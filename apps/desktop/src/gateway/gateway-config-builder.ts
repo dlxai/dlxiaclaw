@@ -108,15 +108,17 @@ export function createGatewayConfigBuilder(deps: GatewayConfigDeps) {
     // Free-tier models the cloud-api proxy will accept without a subscription.
     // Mirrors FREE_MODELS in apps/cloud-api/src/config/free-models.ts.
     const freeModels = [
-      "openrouter/free",
+      // Default: supports tool use (function calling)
+      "meta-llama/llama-3.3-70b-instruct:free",
+      "qwen/qwen-2.5-72b-instruct:free",
+      "google/gemini-2.0-flash-exp:free",
+      // Other free models (may not support tool use)
       "qwen/qwen3-next-80b-a3b-instruct:free",
       "nvidia/nemotron-3-super-120b-a12b:free",
       "nvidia/nemotron-3-nano-30b-a3b:free",
-      "nvidia/nemotron-nano-9b-v2:free",
       "minimax/minimax-m2.5:free",
       "stepfun/step-3.5-flash:free",
       "arcee-ai/trinity-large-preview:free",
-      "arcee-ai/trinity-mini:free",
       "liquid/lfm-2.5-1.2b-instruct:free",
     ];
 
@@ -191,7 +193,7 @@ export function createGatewayConfigBuilder(deps: GatewayConfigDeps) {
     let curModelId = activeKey?.model;
     if (!curProvider && accessMode === "credits") {
       curProvider = "openrouter" as LLMProvider;
-      curModelId = "openrouter/free";
+      curModelId = "meta-llama/llama-3.3-70b-instruct:free";
     }
 
     const curRegion = storage.settings.get("region") ?? (locale === "zh" ? "cn" : "us");

@@ -96,7 +96,7 @@ export const LLMProviderManagerModel = types
         // In credits mode, fall back to the built-in openrouter free model
         const accessMode = storage.settings.get(ACCESS_MODE_KEY) ?? DEFAULT_ACCESS_MODE;
         if (accessMode === "credits") {
-          return { provider: "openrouter", model: "openrouter/free", isOverridden: false };
+          return { provider: "openrouter", model: "meta-llama/llama-3.3-70b-instruct:free", isOverridden: false };
         }
         return null;
       }

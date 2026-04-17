@@ -1,6 +1,6 @@
 /**
  * Models available to free-tier users via OpenRouter.
- * These are models with :free suffix or genuinely free quotas on OpenRouter.
+ * Lead entries support tool use (function calling) — these are best for chat.
  * Add/remove entries here to control free-tier access — no code changes elsewhere needed.
  */
 export declare const FREE_MODELS: readonly string[];
