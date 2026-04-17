@@ -22,7 +22,7 @@ import {
 } from "@rivonclaw/gateway";
 import type { OAuthFlowResult, AcquiredOAuthCredentials, AcquiredCodexOAuthCredentials } from "@rivonclaw/gateway";
 import type { GatewayState } from "@rivonclaw/gateway";
-import { parseProxyUrl, resolveGatewayPort, resolvePanelPort, resolveProxyRouterPort, DEFAULTS, DEFAULT_CLOUD_API_URL } from "@rivonclaw/core";
+import { parseProxyUrl, resolveGatewayPort, resolvePanelPort, resolveProxyRouterPort, DEFAULTS, DEFAULT_CLOUD_API_URL, ACCESS_MODE_KEY, DEFAULT_ACCESS_MODE } from "@rivonclaw/core";
 import { resolveUpdateMarkerPath, resolveHeartbeatPath, resolveRivonClawHome, resolveSessionStateDir, findFreePort } from "@rivonclaw/core/node";
 import { createStorage } from "@rivonclaw/storage";
 import { createSecretStore } from "@rivonclaw/secrets";
@@ -826,16 +826,20 @@ app.whenReady().then(async () => {
       downloadUrl: null,
     });
   });
-  // Connect/disconnect update subscription with auth lifecycle
-  authSession.onUserChanged((user) => {
-    if (user) {
-      updateSubscription.connect(() => authSession.getAccessToken());
-    } else {
-      updateSubscription.disconnect();
-    }
-  });
-  // Initial connect if already authenticated
-  updateSubscription.connect(() => authSession.getAccessToken());
+  // Connect/disconnect update subscription with auth lifecycle.
+  // Skip in credits mode — updates are managed via the cloud-api SSE channel instead.
+  const isCreditsMode = (storage.settings.get(ACCESS_MODE_KEY) ?? DEFAULT_ACCESS_MODE) === "credits";
+  if (!isCreditsMode) {
+    authSession.onUserChanged((user) => {
+      if (user) {
+        updateSubscription.connect(() => authSession.getAccessToken());
+      } else {
+        updateSubscription.disconnect();
+      }
+    });
+    // Initial connect if already authenticated
+    updateSubscription.connect(() => authSession.getAccessToken());
+  }
 
   // Cloud-api SSE update stream — works alongside the GraphQL subscription
   // as an additional channel. Uses the cloud-api URL from settings.
