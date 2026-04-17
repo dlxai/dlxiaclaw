@@ -96,6 +96,12 @@ export function createGatewayConfigBuilder(deps: GatewayConfigDeps) {
     const accessMode = storage.settings.get(ACCESS_MODE_KEY) ?? DEFAULT_ACCESS_MODE;
     if (accessMode !== "credits") return {};
 
+    // If the user has configured their own openrouter key, don't override the
+    // openrouter provider — let their key go directly to openrouter.ai.
+    const hasOwnOpenrouterKey = storage.providerKeys.getAll()
+      .some((k) => k.provider === "openrouter" && k.authType !== "custom");
+    if (hasOwnOpenrouterKey) return {};
+
     const cloudApiUrl = (storage.settings.get(CLOUD_API_URL_KEY) ?? DEFAULT_CLOUD_API_URL).replace(/\/+$/, "");
     const baseUrl = `${cloudApiUrl}/api/proxy/openrouter`;
 
