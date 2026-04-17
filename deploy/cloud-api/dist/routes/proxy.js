@@ -50,15 +50,11 @@ proxyRoute.post("/openrouter/chat/completions", async (c) => {
             return c.json({ error: "Daily quota exceeded. Resets at midnight.", used: dailyLimit, limit: dailyLimit }, 402);
         }
     }
-    // 3. Record in ledger and deduct from credit balance (clamp at 0)
+    // 3. Record consumption in ledger (for history display only — credit_balance
+    //    is managed separately via recharge/signup_bonus, not per-request deduction)
     await sql `
     INSERT INTO credit_ledger (user_id, delta, reason, model, tokens)
     VALUES (${userId}, ${-estimatedTokens}, 'consumption', ${payload.model}, ${estimatedTokens})
-  `;
-    await sql `
-    UPDATE credit_balance
-    SET balance = GREATEST(0, balance - ${estimatedTokens}), updated_at = now()
-    WHERE user_id = ${userId}
   `;
     // 4. Forward to OpenRouter
     const upstreamRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
