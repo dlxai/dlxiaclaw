@@ -56,14 +56,14 @@ proxyRoute.post("/openrouter/chat/completions", async (c) => {
     }
   }
 
-  // 3. Record in ledger and deduct from credit balance
+  // 3. Record in ledger and deduct from credit balance (clamp at 0)
   await sql`
     INSERT INTO credit_ledger (user_id, delta, reason, model, tokens)
     VALUES (${userId}, ${-estimatedTokens}, 'consumption', ${payload.model}, ${estimatedTokens})
   `;
   await sql`
     UPDATE credit_balance
-    SET balance = balance - ${estimatedTokens}, updated_at = now()
+    SET balance = GREATEST(0, balance - ${estimatedTokens}), updated_at = now()
     WHERE user_id = ${userId}
   `;
 
