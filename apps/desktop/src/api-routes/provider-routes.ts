@@ -1,5 +1,5 @@
 import type { LLMProvider } from "@rivonclaw/core";
-import { getDefaultModelForProvider, reconstructProxyUrl, formatError } from "@rivonclaw/core";
+import { getDefaultModelForProvider, reconstructProxyUrl, formatError, ACCESS_MODE_KEY, DEFAULT_ACCESS_MODE } from "@rivonclaw/core";
 import { readFullModelCatalog } from "@rivonclaw/gateway";
 import { createLogger } from "@rivonclaw/logger";
 import { validateProviderApiKey, validateCustomProviderApiKey, fetchCustomProviderModels } from "../providers/provider-validator.js";
@@ -382,6 +382,35 @@ export const handleProviderRoutes: RouteHandler = async (req, res, url, pathname
           }
         } catch {
           // Invalid JSON in customModelsJson — skip
+        }
+      }
+    }
+
+    // In credits mode with no own openrouter key, inject the free-tier model list
+    // so KeyModelSelector can display them (same list as buildCreditsProviderOverride).
+    const accessMode = storage.settings.get(ACCESS_MODE_KEY) ?? DEFAULT_ACCESS_MODE;
+    if (accessMode === "credits") {
+      const hasOwnOpenrouterKey = allKeys.some(
+        (k) => k.provider === "openrouter" && k.authType !== "custom",
+      );
+      if (!hasOwnOpenrouterKey) {
+        const freeModels = [
+          { id: "openrouter/free", name: "Free (auto-select)" },
+          { id: "qwen/qwen3-next-80b-a3b-instruct:free", name: "Qwen3 80B (free)" },
+          { id: "nvidia/nemotron-3-super-120b-a12b:free", name: "Nemotron 120B (free)" },
+          { id: "nvidia/nemotron-3-nano-30b-a3b:free", name: "Nemotron 30B (free)" },
+          { id: "nvidia/nemotron-nano-9b-v2:free", name: "Nemotron 9B (free)" },
+          { id: "minimax/minimax-m2.5:free", name: "MiniMax M2.5 (free)" },
+          { id: "stepfun/step-3.5-flash:free", name: "Step 3.5 Flash (free)" },
+          { id: "arcee-ai/trinity-large-preview:free", name: "Trinity Large (free)" },
+          { id: "arcee-ai/trinity-mini:free", name: "Trinity Mini (free)" },
+          { id: "liquid/lfm-2.5-1.2b-instruct:free", name: "LFM 2.5 1.2B (free)" },
+        ];
+        const existing = catalog["openrouter"] ?? [];
+        const existingIds = new Set(existing.map((e) => e.id));
+        const extras = freeModels.filter((m) => !existingIds.has(m.id));
+        if (extras.length > 0) {
+          catalog["openrouter"] = [...extras, ...existing];
         }
       }
     }

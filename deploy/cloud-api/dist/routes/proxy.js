@@ -67,8 +67,16 @@ proxyRoute.post("/openrouter/chat/completions", async (c) => {
         },
         body: JSON.stringify(payload),
     });
+    // Non-OK response: return JSON error regardless of whether stream was requested
+    if (!upstreamRes.ok) {
+        const errorBody = await upstreamRes.text();
+        return new Response(errorBody, {
+            status: upstreamRes.status,
+            headers: { "Content-Type": upstreamRes.headers.get("Content-Type") ?? "application/json" },
+        });
+    }
     const isStreaming = payload.stream === true;
-    if (isStreaming && upstreamRes.ok && upstreamRes.body) {
+    if (isStreaming && upstreamRes.body) {
         c.header("Content-Type", "text/event-stream");
         c.header("Cache-Control", "no-cache");
         return stream(c, async (s) => {
@@ -78,7 +86,13 @@ proxyRoute.post("/openrouter/chat/completions", async (c) => {
                     const { done, value } = await reader.read();
                     if (done)
                         break;
-                    await s.write(value);
+                    try {
+                        await s.write(value);
+                    }
+                    catch {
+                        // Client disconnected — stop reading upstream
+                        break;
+                    }
                 }
             }
             finally {
