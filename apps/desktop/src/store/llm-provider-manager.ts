@@ -1,6 +1,6 @@
 import { types, flow, getRoot, getEnv } from "mobx-state-tree";
 import { randomUUID } from "node:crypto";
-import { parseProxyUrl, resolveGatewayProvider, getApiBaseUrl, ScopeType } from "@rivonclaw/core";
+import { parseProxyUrl, resolveGatewayProvider, getApiBaseUrl, ScopeType, ACCESS_MODE_KEY, DEFAULT_ACCESS_MODE } from "@rivonclaw/core";
 import type { LLMProvider, ProviderKeyEntry, ToolScopeType } from "@rivonclaw/core";
 import type { Storage } from "@rivonclaw/storage";
 import type { SecretStore } from "@rivonclaw/secrets";
@@ -82,16 +82,25 @@ export const LLMProviderManagerModel = types
     },
     /** Get the fully resolved model info for a session (override → global fallback). */
     getSessionModelInfo(sessionKey: string): {
-      provider: string; model: string; isOverridden: boolean;
+      provider: string; model: string; isOverridden: boolean; contextWindow?: number | null;
     } | null {
       const { storage } = (self as any)._env as LLMProviderManagerEnv;
       const activeKey = storage.providerKeys.getActive();
-      if (!activeKey) return null;
 
       const override = self.sessionOverrides.get(sessionKey);
       if (override) {
         return { provider: override.provider, model: override.model, isOverridden: true };
       }
+
+      if (!activeKey) {
+        // In credits mode, fall back to the built-in openrouter free model
+        const accessMode = storage.settings.get(ACCESS_MODE_KEY) ?? DEFAULT_ACCESS_MODE;
+        if (accessMode === "credits") {
+          return { provider: "openrouter", model: "openrouter/free", isOverridden: false };
+        }
+        return null;
+      }
+
       return { provider: activeKey.provider, model: activeKey.model, isOverridden: false };
     },
   }))
