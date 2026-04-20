@@ -728,6 +728,11 @@ export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAg
         isOverridden: info.isOverridden,
         contextWindow: info.contextWindow,
       });
+      // If not overridden, reset gateway session to its configured default so stale
+      // persisted session models (e.g. "openrouter/free") are cleared out.
+      if (!info.isOverridden) {
+        entityStore.llmManager.resetSessionModel(sessionKey).catch(() => {});
+      }
       // Fetch full catalog for the cascading selector (all providers' models)
       const catalog = await fetchModelCatalog();
       if (gen !== modelRefreshGenRef.current) return;
@@ -1395,7 +1400,7 @@ export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAg
       <div className="chat-status">
         <span className={`chat-status-dot chat-status-dot-${connectionState}`} />
         <span>{t(statusKey)}</span>
-        {connectionState === "connected" && activeModel && (showModelSelector || entityStore.providerKeys.some((k) => k.authType === "custom")) && (
+        {connectionState === "connected" && activeModel && (showModelSelector || entityStore.providerKeys.length > 0) && (
           <KeyModelSelector
             keys={(() => {
               const userKeys = entityStore.providerKeys.map((k) => ({
@@ -1424,7 +1429,7 @@ export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAg
             freeModelIds={accessMode === "credits" ? CREDITS_FREE_MODEL_IDS : undefined}
           />
         )}
-        {connectionState === "connected" && activeModel && !showModelSelector && !entityStore.providerKeys.some((k) => k.authType === "custom") && (
+        {connectionState === "connected" && activeModel && !showModelSelector && entityStore.providerKeys.length === 0 && (
           <span className="chat-model-badge">
             {activeModel.model.split("/").pop()?.replace(":free", "") ?? activeModel.model}
           </span>
