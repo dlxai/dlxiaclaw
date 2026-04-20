@@ -34,6 +34,8 @@ export interface KeyModelSelectorProps {
   variant?: "compact" | "form";
   /** When true, trigger shows "默认模型" when the selected provider is "openrouter". */
   creditsMode?: boolean;
+  /** Model IDs that belong to the free tier (for group labeling). Only used when creditsMode=true. */
+  freeModelIds?: string[];
 }
 
 /**
@@ -49,6 +51,7 @@ export function KeyModelSelector({
   disabled,
   variant = "compact",
   creditsMode,
+  freeModelIds,
 }: KeyModelSelectorProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -89,6 +92,18 @@ export function KeyModelSelector({
       (m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q),
     );
   }, [catalog, activeProvider, search]);
+
+  // Grouping for credits mode: split into free / premium
+  const freeSet = useMemo(() => new Set(freeModelIds ?? []), [freeModelIds]);
+  const showGroups = !!(creditsMode && freeSet.size > 0 && activeProvider === "openrouter");
+  const freeModels = useMemo(
+    () => (showGroups ? activeModels.filter((m) => freeSet.has(m.id)) : activeModels),
+    [showGroups, activeModels, freeSet],
+  );
+  const premiumModels = useMemo(
+    () => (showGroups ? activeModels.filter((m) => !freeSet.has(m.id)) : []),
+    [showGroups, activeModels, freeSet],
+  );
 
   /** Compute dropdown position synchronously from the trigger's bounding rect. */
   function computePosition(): React.CSSProperties {
@@ -254,7 +269,10 @@ export function KeyModelSelector({
 
             {/* Right column: models for active provider */}
             <div className="key-model-selector-models">
-              {activeModels.map((m) => (
+              {showGroups && freeModels.length > 0 && premiumModels.length > 0 && (
+                <div className="key-model-selector__group-label">免费模型</div>
+              )}
+              {freeModels.map((m) => (
                 <button
                   type="button"
                   key={m.id}
@@ -269,6 +287,26 @@ export function KeyModelSelector({
                   )}
                 </button>
               ))}
+              {showGroups && premiumModels.length > 0 && (
+                <>
+                  <div className="key-model-selector__group-label">高级模型</div>
+                  {premiumModels.map((m) => (
+                    <button
+                      type="button"
+                      key={m.id}
+                      className={`key-model-selector-model${m.id === selectedModel && activeProvider === selectedProvider ? " key-model-selector-model-active" : ""}`}
+                      onClick={() => handleSelectModel(activeProvider, m.id)}
+                    >
+                      <span className="key-model-selector-model-name">{m.name}</span>
+                      {m.contextWindow != null && m.contextWindow > 0 && (
+                        <span className="key-model-selector-model-ctx">
+                          {formatContextWindow(m.contextWindow)}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </>
+              )}
               {activeModels.length === 0 && (
                 <div className="key-model-selector-empty">
                   {search.trim()

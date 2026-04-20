@@ -407,3 +407,15 @@
 [data-theme="dark"] .key-model-selector-form .key-model-selector-trigger:hover:not(:disabled) {
   border-color: rgba(255, 255, 255, 0.12);
 }
+
+/* ---- Group Labels (credits mode: free / premium) ---- */
+.key-model-selector__group-label {
+  padding: 4px 10px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted, #87867f);
+  pointer-events: none;
+  user-select: none;
+}

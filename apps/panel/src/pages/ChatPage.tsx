@@ -29,6 +29,20 @@ import { useEntityStore } from "../store/EntityStoreProvider.js";
 import { setRunProfileForScope } from "../api/tool-registry.js";
 import "./chat/ChatPage.css";
 
+// Mirrors apps/cloud-api/src/config/free-models.ts — keep in sync
+const CREDITS_FREE_MODEL_IDS = [
+  "meta-llama/llama-3.3-70b-instruct:free",
+  "qwen/qwen-2.5-72b-instruct:free",
+  "google/gemini-2.0-flash-exp:free",
+  "qwen/qwen3-next-80b-a3b-instruct:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "nvidia/nemotron-3-nano-30b-a3b:free",
+  "minimax/minimax-m2.5:free",
+  "stepfun/step-3.5-flash:free",
+  "arcee-ai/trinity-large-preview:free",
+  "liquid/lfm-2.5-1.2b-instruct:free",
+];
+
 export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAgentNameChange?: (name: string | null) => void }) {
   const { t, i18n } = useTranslation();
   const { showToast } = useToast();
@@ -1407,6 +1421,7 @@ export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAg
             selectedModel={activeModel.model}
             onChange={handleKeyModelChange}
             creditsMode={accessMode === "credits"}
+            freeModelIds={accessMode === "credits" ? CREDITS_FREE_MODEL_IDS : undefined}
           />
         )}
         {connectionState === "connected" && activeModel && !showModelSelector && !entityStore.providerKeys.some((k) => k.authType === "custom") && (
