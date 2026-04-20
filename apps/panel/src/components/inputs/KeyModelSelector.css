@@ -415,7 +415,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-muted, #87867f);
+  color: var(--color-text-muted);
   pointer-events: none;
   user-select: none;
 }

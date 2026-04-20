@@ -97,7 +97,7 @@ export function KeyModelSelector({
   const freeSet = useMemo(() => new Set(freeModelIds ?? []), [freeModelIds]);
   const showGroups = !!(creditsMode && freeSet.size > 0 && activeProvider === "openrouter");
   const freeModels = useMemo(
-    () => (showGroups ? activeModels.filter((m) => freeSet.has(m.id)) : activeModels),
+    () => (showGroups ? activeModels.filter((m) => freeSet.has(m.id)) : []),
     [showGroups, activeModels, freeSet],
   );
   const premiumModels = useMemo(
@@ -193,6 +193,26 @@ export function KeyModelSelector({
   function handleSelectModel(provider: string, modelId: string) {
     onChange(provider, modelId);
     setOpen(false);
+    setSearch("");
+  }
+
+  function renderModelBtn(m: CatalogModel) {
+    const isActive = m.id === selectedModel && activeProvider === selectedProvider;
+    return (
+      <button
+        key={m.id}
+        type="button"
+        className={`key-model-selector-model${isActive ? " key-model-selector-model-active" : ""}`}
+        onClick={() => handleSelectModel(activeProvider, m.id)}
+      >
+        <span className="key-model-selector-model-name">{m.name}</span>
+        {m.contextWindow != null && m.contextWindow > 0 && (
+          <span className="key-model-selector-model-ctx">
+            {formatContextWindow(m.contextWindow)}
+          </span>
+        )}
+      </button>
+    );
   }
 
   return (
@@ -269,43 +289,21 @@ export function KeyModelSelector({
 
             {/* Right column: models for active provider */}
             <div className="key-model-selector-models">
-              {showGroups && freeModels.length > 0 && premiumModels.length > 0 && (
-                <div className="key-model-selector__group-label">免费模型</div>
-              )}
-              {freeModels.map((m) => (
-                <button
-                  type="button"
-                  key={m.id}
-                  className={`key-model-selector-model${m.id === selectedModel && activeProvider === selectedProvider ? " key-model-selector-model-active" : ""}`}
-                  onClick={() => handleSelectModel(activeProvider, m.id)}
-                >
-                  <span className="key-model-selector-model-name">{m.name}</span>
-                  {m.contextWindow != null && m.contextWindow > 0 && (
-                    <span className="key-model-selector-model-ctx">
-                      {formatContextWindow(m.contextWindow)}
-                    </span>
-                  )}
-                </button>
-              ))}
-              {showGroups && premiumModels.length > 0 && (
+              {showGroups ? (
                 <>
-                  <div className="key-model-selector__group-label">高级模型</div>
-                  {premiumModels.map((m) => (
-                    <button
-                      type="button"
-                      key={m.id}
-                      className={`key-model-selector-model${m.id === selectedModel && activeProvider === selectedProvider ? " key-model-selector-model-active" : ""}`}
-                      onClick={() => handleSelectModel(activeProvider, m.id)}
-                    >
-                      <span className="key-model-selector-model-name">{m.name}</span>
-                      {m.contextWindow != null && m.contextWindow > 0 && (
-                        <span className="key-model-selector-model-ctx">
-                          {formatContextWindow(m.contextWindow)}
-                        </span>
-                      )}
-                    </button>
-                  ))}
+                  {freeModels.length > 0 && premiumModels.length > 0 && (
+                    <div className="key-model-selector__group-label">免费模型</div>
+                  )}
+                  {freeModels.map(renderModelBtn)}
+                  {premiumModels.length > 0 && (
+                    <>
+                      <div className="key-model-selector__group-label">高级模型</div>
+                      {premiumModels.map(renderModelBtn)}
+                    </>
+                  )}
                 </>
+              ) : (
+                activeModels.map(renderModelBtn)
               )}
               {activeModels.length === 0 && (
                 <div className="key-model-selector-empty">
