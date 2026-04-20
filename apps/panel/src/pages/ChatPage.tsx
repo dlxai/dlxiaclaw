@@ -23,6 +23,7 @@ import type { GatewaySessionInfo } from "./chat/SessionTabBar.js";
 import { ChatInputArea } from "./chat/ChatInputArea.js";
 import { RunProfileSelector } from "../components/inputs/RunProfileSelector.js";
 import { fetchModelCatalog } from "../api/providers.js";
+import { fetchQuota } from "../api/credits.js";
 import { observer } from "mobx-react-lite";
 import { useEntityStore } from "../store/EntityStoreProvider.js";
 import { setRunProfileForScope } from "../api/tool-registry.js";
@@ -768,9 +769,8 @@ export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAg
           const mode = s["access_mode"];
           if (mode) setAccessMode(mode);
           // Fetch quota to determine model selector visibility
-          if (mode === "credits" || (!mode && accessMode === "credits")) {
+          if (mode === "credits") {
             try {
-              const { fetchQuota } = await import("../api/credits.js");
               const quota = await fetchQuota();
               if (!cancelled) setShowModelSelector(quota.show_model);
             } catch {
@@ -1395,7 +1395,7 @@ export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAg
                 userKeys.unshift({
                   id: "__credits_default__",
                   provider: "openrouter",
-                  label: "默认",
+                  label: t("chat.creditsDefaultLabel", { defaultValue: "Default" }),
                   model: "meta-llama/llama-3.3-70b-instruct:free",
                   isDefault: false,
                 });
