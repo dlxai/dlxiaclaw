@@ -185,15 +185,19 @@ export function createGatewayConfigBuilder(deps: GatewayConfigDeps) {
     const activeKey = storage.providerKeys.getActive();
     const accessMode = storage.settings.get(ACCESS_MODE_KEY) ?? DEFAULT_ACCESS_MODE;
 
-    // In credits mode, when the user has no provider key configured, fall back
-    // to the openrouter override that buildCreditsProviderOverride() injects.
-    // This way users in credits mode get a working default model out of the box
-    // — no need to manually add a key.
+    // In credits mode, use the openrouter credits proxy as default unless the
+    // user has explicitly configured their own openrouter key.
+    // This ensures users in credits mode get a working model out of the box
+    // regardless of any other provider keys they may have configured.
     let curProvider = activeKey?.provider as LLMProvider | undefined;
     let curModelId = activeKey?.model;
-    if (!curProvider && accessMode === "credits") {
-      curProvider = "openrouter" as LLMProvider;
-      curModelId = "meta-llama/llama-3.3-70b-instruct:free";
+    if (accessMode === "credits") {
+      const hasOwnOpenrouterKey = storage.providerKeys.getAll()
+        .some((k) => k.provider === "openrouter" && k.authType !== "custom");
+      if (!hasOwnOpenrouterKey) {
+        curProvider = "openrouter" as LLMProvider;
+        curModelId = "meta-llama/llama-3.3-70b-instruct:free";
+      }
     }
 
     const curRegion = storage.settings.get("region") ?? (locale === "zh" ? "cn" : "us");

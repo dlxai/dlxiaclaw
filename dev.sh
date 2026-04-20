@@ -9,7 +9,7 @@ ELECTRON_EXE="$REPO_ROOT/node_modules/.pnpm/electron@$(ls "$REPO_ROOT/node_modul
 
 # Kill any leftover processes
 for port in 5180 3210; do
-  pid=$(netstat -ano 2>/dev/null | grep ":${port} " | grep LISTENING | awk '{print $5}' | head -1)
+  pid=$(netstat -ano 2>/dev/null | grep ":${port} " | grep LISTENING | awk '{print $5}' | head -1 || true)
   if [ -n "$pid" ]; then
     taskkill //F //PID "$pid" 2>/dev/null || true
   fi

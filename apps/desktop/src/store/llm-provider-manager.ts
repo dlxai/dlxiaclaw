@@ -92,14 +92,19 @@ export const LLMProviderManagerModel = types
         return { provider: override.provider, model: override.model, isOverridden: true };
       }
 
-      if (!activeKey) {
-        // In credits mode, fall back to the built-in openrouter free model
-        const accessMode = storage.settings.get(ACCESS_MODE_KEY) ?? DEFAULT_ACCESS_MODE;
-        if (accessMode === "credits") {
+      const accessMode = storage.settings.get(ACCESS_MODE_KEY) ?? DEFAULT_ACCESS_MODE;
+
+      // In credits mode, use openrouter free model as the default unless the user
+      // has explicitly configured their own openrouter key.
+      if (accessMode === "credits") {
+        const hasOwnOpenrouterKey = storage.providerKeys.getAll()
+          .some((k) => k.provider === "openrouter" && k.authType !== "custom");
+        if (!hasOwnOpenrouterKey) {
           return { provider: "openrouter", model: "meta-llama/llama-3.3-70b-instruct:free", isOverridden: false };
         }
-        return null;
       }
+
+      if (!activeKey) return null;
 
       return { provider: activeKey.provider, model: activeKey.model, isOverridden: false };
     },

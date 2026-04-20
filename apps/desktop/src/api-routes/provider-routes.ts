@@ -395,15 +395,15 @@ export const handleProviderRoutes: RouteHandler = async (req, res, url, pathname
       );
       if (!hasOwnOpenrouterKey) {
         const freeModels = [
-          { id: "openrouter/free", name: "Free (auto-select)" },
+          { id: "meta-llama/llama-3.3-70b-instruct:free", name: "Llama 3.3 70B (free)" },
+          { id: "qwen/qwen-2.5-72b-instruct:free", name: "Qwen 2.5 72B (free)" },
+          { id: "google/gemini-2.0-flash-exp:free", name: "Gemini 2.0 Flash (free)" },
           { id: "qwen/qwen3-next-80b-a3b-instruct:free", name: "Qwen3 80B (free)" },
           { id: "nvidia/nemotron-3-super-120b-a12b:free", name: "Nemotron 120B (free)" },
           { id: "nvidia/nemotron-3-nano-30b-a3b:free", name: "Nemotron 30B (free)" },
-          { id: "nvidia/nemotron-nano-9b-v2:free", name: "Nemotron 9B (free)" },
           { id: "minimax/minimax-m2.5:free", name: "MiniMax M2.5 (free)" },
           { id: "stepfun/step-3.5-flash:free", name: "Step 3.5 Flash (free)" },
           { id: "arcee-ai/trinity-large-preview:free", name: "Trinity Large (free)" },
-          { id: "arcee-ai/trinity-mini:free", name: "Trinity Mini (free)" },
           { id: "liquid/lfm-2.5-1.2b-instruct:free", name: "LFM 2.5 1.2B (free)" },
         ];
         const existing = catalog["openrouter"] ?? [];
