@@ -2,34 +2,9 @@ import { Hono } from "hono";
 import { stream } from "hono/streaming";
 import { sql } from "../db/client.js";
 import { isFreeModel } from "../config/free-models.js";
-import { getActiveSubscription } from "../db/quota.js";
+import { getActiveSubscription, deductMonthlyTokens, deductDailyTokens } from "../db/quota.js";
 
 export const proxyRoute = new Hono<{ Variables: { userId: string } }>();
-
-/** Deduct tokens from daily_quota. Returns false if over limit. */
-async function deductDailyTokens(userId: string, tokens: number, dailyLimit: number): Promise<boolean> {
-  const today = new Date().toISOString().slice(0, 10);
-  return sql.begin(async (tx) => {
-    await tx`
-      INSERT INTO daily_quota (user_id, date, tokens_used)
-      VALUES (${userId}, ${today}::date, 0)
-      ON CONFLICT (user_id) DO UPDATE
-        SET tokens_used = CASE
-              WHEN daily_quota.date < ${today}::date THEN 0
-              ELSE daily_quota.tokens_used
-            END,
-            date = ${today}::date
-    `;
-    const [updated] = await tx<{ tokens_used: number }[]>`
-      UPDATE daily_quota
-      SET tokens_used = tokens_used + ${tokens}
-      WHERE user_id = ${userId}
-        AND tokens_used + ${tokens} <= ${dailyLimit}
-      RETURNING tokens_used
-    `;
-    return !!updated;
-  });
-}
 
 /** Record actual consumption in the ledger and balance. */
 async function recordActualUsage(userId: string, model: string, promptTokens: number, completionTokens: number): Promise<void> {
@@ -116,6 +91,7 @@ proxyRoute.post("/openrouter/chat/completions", async (c) => {
       const decoder = new TextDecoder();
       let usagePromptTokens = 0;
       let usageCompletionTokens = 0;
+      let sseBuffer = "";
 
       try {
         while (true) {
@@ -123,7 +99,13 @@ proxyRoute.post("/openrouter/chat/completions", async (c) => {
           if (done) break;
 
           const chunk = decoder.decode(value, { stream: true });
-          for (const line of chunk.split("\n")) {
+          sseBuffer += chunk;
+
+          // Only process complete lines (ending with \n)
+          const lines = sseBuffer.split("\n");
+          sseBuffer = lines.pop() ?? "";  // Keep incomplete last line for next chunk
+
+          for (const line of lines) {
             if (!line.startsWith("data: ")) continue;
             const data = line.slice(6).trim();
             if (data === "[DONE]") continue;
@@ -148,7 +130,9 @@ proxyRoute.post("/openrouter/chat/completions", async (c) => {
         reader.releaseLock();
         const totalTokens = usagePromptTokens + usageCompletionTokens;
         if (totalTokens > 0) {
-          if (!sub) {
+          if (sub) {
+            await deductMonthlyTokens(sub.id, totalTokens).catch(() => {});
+          } else {
             await deductDailyTokens(userId, totalTokens, dailyLimit).catch(() => {});
           }
           await recordActualUsage(userId, payload.model, usagePromptTokens, usageCompletionTokens).catch(() => {});
@@ -165,7 +149,9 @@ proxyRoute.post("/openrouter/chat/completions", async (c) => {
     const completionTokens: number = parsed.usage?.completion_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
     if (totalTokens > 0) {
-      if (!sub) {
+      if (sub) {
+        await deductMonthlyTokens(sub.id, totalTokens).catch(() => {});
+      } else {
         await deductDailyTokens(userId, totalTokens, dailyLimit).catch(() => {});
       }
       await recordActualUsage(userId, payload.model, promptTokens, completionTokens).catch(() => {});
