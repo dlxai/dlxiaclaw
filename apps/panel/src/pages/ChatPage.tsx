@@ -48,6 +48,7 @@ export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAg
   // Track access mode so we can skip the "no provider key" pre-flight when the
   // user is on credits mode — in that case the gateway routes via cloud-api.
   const [accessMode, setAccessMode] = useState<string>("credits");
+  const [showModelSelector, setShowModelSelector] = useState(false);
   const [thinkingLevel, setThinkingLevel] = useState("");
   const [allFetched, setAllFetched] = useState(false);
   const [renderTick, forceUpdate] = useReducer((x: number) => x + 1, 0);
@@ -762,10 +763,20 @@ export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAg
         setCollapseMessages(collapse);
 
         // Load custom example prompts from settings + access mode
-        fetchSettings().then((s) => {
+        fetchSettings().then(async (s) => {
           if (cancelled) return;
           const mode = s["access_mode"];
           if (mode) setAccessMode(mode);
+          // Fetch quota to determine model selector visibility
+          if (mode === "credits" || (!mode && accessMode === "credits")) {
+            try {
+              const { fetchQuota } = await import("../api/credits.js");
+              const quota = await fetchQuota();
+              if (!cancelled) setShowModelSelector(quota.show_model);
+            } catch {
+              // Leave showModelSelector as false (safe default for free tier)
+            }
+          }
         }).catch(() => {});
 
         const info = await fetchGatewayInfo();
@@ -1370,7 +1381,7 @@ export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAg
       <div className="chat-status">
         <span className={`chat-status-dot chat-status-dot-${connectionState}`} />
         <span>{t(statusKey)}</span>
-        {connectionState === "connected" && activeModel && (
+        {connectionState === "connected" && activeModel && (showModelSelector || entityStore.providerKeys.some((k) => k.authType === "custom")) && (
           <KeyModelSelector
             keys={(() => {
               const userKeys = entityStore.providerKeys.map((k) => ({
@@ -1380,14 +1391,12 @@ export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAg
                 model: k.model,
                 isDefault: k.isDefault,
               }));
-              // In credits mode, prepend the built-in openrouter provider so users
-              // can always switch back to the default free models.
               if (accessMode === "credits" && !userKeys.some((k) => k.provider === "openrouter")) {
                 userKeys.unshift({
                   id: "__credits_default__",
                   provider: "openrouter",
-                  label: t("chat.creditsDefaultLabel", { defaultValue: "默认" }),
-                  model: "openrouter/free",
+                  label: "默认",
+                  model: "meta-llama/llama-3.3-70b-instruct:free",
                   isDefault: false,
                 });
               }
@@ -1399,6 +1408,11 @@ export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAg
             onChange={handleKeyModelChange}
             creditsMode={accessMode === "credits"}
           />
+        )}
+        {connectionState === "connected" && activeModel && !showModelSelector && !entityStore.providerKeys.some((k) => k.authType === "custom") && (
+          <span className="chat-model-badge">
+            {activeModel.model.split("/").pop()?.replace(":free", "") ?? activeModel.model}
+          </span>
         )}
         {connectionState === "connected" && (
           <Select
