@@ -30,6 +30,8 @@ export interface LLMProviderManagerEnv {
   restartGateway: () => Promise<void>;
   stateDir: string;
   getLastSystemProxy: () => string | null;
+  /** Re-sync the credits JWT into auth-profiles.json after syncAllAuthProfiles overwrites it. */
+  syncCreditsToken?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,9 +193,14 @@ export const LLMProviderManagerModel = types
      * Sync auth profiles and proxy router config.
      */
     async function syncAuthAndProxy(): Promise<void> {
-      const { syncAllAuthProfiles, writeProxyRouterConfig, stateDir, storage, secretStore, getLastSystemProxy } = getEnvDeps();
+      const { syncAllAuthProfiles, writeProxyRouterConfig, stateDir, storage, secretStore, getLastSystemProxy, syncCreditsToken } = getEnvDeps();
       await Promise.all([
-        syncAllAuthProfiles(stateDir, storage, secretStore),
+        syncAllAuthProfiles(stateDir, storage, secretStore).then(() => {
+          // Re-sync credits JWT — syncAllAuthProfiles overwrites auth-profiles.json
+          // based on storage provider keys, and the credits JWT (not a storage key)
+          // is lost. Re-apply it so the credits OpenRouter proxy keeps working.
+          syncCreditsToken?.();
+        }),
         writeProxyRouterConfig(storage, secretStore, getLastSystemProxy()),
       ]);
     }

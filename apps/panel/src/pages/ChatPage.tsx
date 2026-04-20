@@ -1410,7 +1410,9 @@ export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAg
                 model: k.model,
                 isDefault: k.isDefault,
               }));
-              if (accessMode === "credits" && !userKeys.some((k) => k.provider === "openrouter")) {
+              // Only inject the credits OpenRouter entry for subscribed users (showModelSelector).
+              // Free users cannot switch OpenRouter models; they can only switch to their own keys.
+              if (accessMode === "credits" && showModelSelector && !userKeys.some((k) => k.provider === "openrouter")) {
                 userKeys.unshift({
                   id: "__credits_default__",
                   provider: "openrouter",

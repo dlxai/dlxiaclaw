@@ -1579,6 +1579,10 @@ app.whenReady().then(async () => {
     },
     stateDir,
     getLastSystemProxy: () => lastSystemProxy,
+    syncCreditsToken: () => {
+      const token = creditsTokenGetter();
+      if (token) syncAuthProfile(stateDir, "openrouter", token);
+    },
   });
 
   Promise.all([
