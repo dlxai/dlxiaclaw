@@ -3,20 +3,18 @@ import { Hono } from "hono";
 import { authMiddleware } from "../middleware/auth.js";
 import { proxyRoute } from "../routes/proxy.js";
 
-vi.mock("../db/client.js", () => ({ sql: vi.fn() }));
+vi.mock("../db/client.js", () => ({
+  sql: Object.assign(vi.fn(), { begin: vi.fn() }),
+}));
 vi.mock("../db/quota.js", () => ({
   getActiveSubscription: vi.fn(),
-  deductDailyTokens: vi.fn(),
-  deductMonthlyTokens: vi.fn(),
 }));
 
 import { sql } from "../db/client.js";
-import { getActiveSubscription, deductDailyTokens, deductMonthlyTokens } from "../db/quota.js";
+import { getActiveSubscription } from "../db/quota.js";
 
 const mockGetSub = getActiveSubscription as ReturnType<typeof vi.fn>;
-const mockDeductDaily = deductDailyTokens as ReturnType<typeof vi.fn>;
-const mockDeductMonthly = deductMonthlyTokens as ReturnType<typeof vi.fn>;
-const sqlMock = sql as unknown as ReturnType<typeof vi.fn>;
+const sqlMock = sql as unknown as ReturnType<typeof vi.fn> & { begin: ReturnType<typeof vi.fn> };
 
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
@@ -66,10 +64,11 @@ describe("POST /api/proxy/openrouter/chat/completions", () => {
     expect(json.error).toMatch(/free plan/i);
   });
 
-  it("returns 402 when free user exceeds daily quota", async () => {
-    sqlMock.mockResolvedValueOnce([{ jwt_secret: "test-user-secret-32-chars-padded!!" }]);
+  it("returns 402 when free user has already hit daily quota", async () => {
+    sqlMock
+      .mockResolvedValueOnce([{ jwt_secret: "test-user-secret-32-chars-padded!!" }]) // auth
+      .mockResolvedValueOnce([{ date: new Date().toISOString().slice(0, 10), tokens_used: 100_001 }]); // daily_quota row
     mockGetSub.mockResolvedValueOnce(null);
-    mockDeductDaily.mockResolvedValueOnce(false); // quota exceeded
     const token = await makeToken();
     const res = await app.request("/api/proxy/openrouter/chat/completions", {
       method: "POST",
@@ -81,17 +80,21 @@ describe("POST /api/proxy/openrouter/chat/completions", () => {
     expect(json.error).toMatch(/quota/i);
   });
 
-  it("proxies request when free user uses free model within quota", async () => {
+  it("proxies request for free user within quota and records usage after response", async () => {
+    const today = new Date().toISOString().slice(0, 10);
     sqlMock
-      .mockResolvedValueOnce([{ jwt_secret: "test-user-secret-32-chars-padded!!" }])
-      .mockResolvedValueOnce(undefined); // INSERT credit_ledger
+      .mockResolvedValueOnce([{ jwt_secret: "test-user-secret-32-chars-padded!!" }]) // auth
+      .mockResolvedValueOnce([{ date: today, tokens_used: 500 }]); // daily_quota pre-flight check
+    // begin() for deductDailyTokens post-response
+    sqlMock.begin.mockResolvedValueOnce(true);
+    // recordActualUsage INSERT
+    sqlMock.mockResolvedValueOnce(undefined);
     mockGetSub.mockResolvedValueOnce(null);
-    mockDeductDaily.mockResolvedValueOnce(true); // within quota
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ choices: [{ message: { content: "Hi" } }] }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      })
+      new Response(
+        JSON.stringify({ choices: [{ message: { content: "Hi" } }], usage: { prompt_tokens: 10, completion_tokens: 20 } }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
     );
     const token = await makeToken();
     const res = await app.request("/api/proxy/openrouter/chat/completions", {
@@ -106,18 +109,17 @@ describe("POST /api/proxy/openrouter/chat/completions", () => {
     );
   });
 
-  it("uses monthly pool first for subscribed user, then daily fallback", async () => {
+  it("proxies request for subscribed user without daily quota check", async () => {
     sqlMock
-      .mockResolvedValueOnce([{ jwt_secret: "test-user-secret-32-chars-padded!!" }])
-      .mockResolvedValueOnce(undefined); // INSERT credit_ledger
+      .mockResolvedValueOnce([{ jwt_secret: "test-user-secret-32-chars-padded!!" }]) // auth
+      .mockResolvedValueOnce(undefined); // recordActualUsage INSERT
     const sub = { id: "sub-1", tier: "basic", tokens_monthly: 5_000_000, tokens_used: 0, period_end: "2026-05-01" };
     mockGetSub.mockResolvedValueOnce(sub);
-    mockDeductMonthly.mockResolvedValueOnce(true); // monthly pool has space
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ choices: [] }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      })
+      new Response(
+        JSON.stringify({ choices: [], usage: { prompt_tokens: 50, completion_tokens: 100 } }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
     );
     const token = await makeToken();
     const res = await app.request("/api/proxy/openrouter/chat/completions", {
@@ -126,7 +128,7 @@ describe("POST /api/proxy/openrouter/chat/completions", () => {
       body: JSON.stringify({ model: "gpt-4o", messages: [{ role: "user", content: "hello" }] }),
     });
     expect(res.status).toBe(200);
-    expect(mockDeductMonthly).toHaveBeenCalledWith("sub-1", expect.any(Number));
-    expect(mockDeductDaily).not.toHaveBeenCalled();
+    // Subscribed users skip daily quota pre-flight — sql.begin should not be called for deduction
+    expect(sqlMock.begin).not.toHaveBeenCalled();
   });
 });
