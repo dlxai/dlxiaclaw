@@ -64,6 +64,7 @@ export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAg
   // user is on credits mode — in that case the gateway routes via cloud-api.
   const [accessMode, setAccessMode] = useState<string>("credits");
   const [showModelSelector, setShowModelSelector] = useState(false);
+  const [creditsFreeModels, setCreditsFreeModels] = useState<string[]>(CREDITS_FREE_MODEL_IDS);
   const [thinkingLevel, setThinkingLevel] = useState("");
   const [allFetched, setAllFetched] = useState(false);
   const [renderTick, forceUpdate] = useReducer((x: number) => x + 1, 0);
@@ -791,9 +792,15 @@ export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAg
           if (mode === "credits") {
             try {
               const quota = await fetchQuota();
-              if (!cancelled) setShowModelSelector(quota.show_model);
+              if (!cancelled) {
+                setShowModelSelector(quota.show_model);
+                // Use server-verified free models (tool-use capable, currently available)
+                if (quota.free_models && quota.free_models.length > 0) {
+                  setCreditsFreeModels(quota.free_models);
+                }
+              }
             } catch {
-              // Leave showModelSelector as false (safe default for free tier)
+              // Leave showModelSelector as false and keep hardcoded fallback list
             }
           }
         }).catch(() => {});
@@ -1428,7 +1435,7 @@ export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAg
             selectedModel={activeModel.model}
             onChange={handleKeyModelChange}
             creditsMode={accessMode === "credits"}
-            freeModelIds={accessMode === "credits" ? CREDITS_FREE_MODEL_IDS : undefined}
+            freeModelIds={accessMode === "credits" ? creditsFreeModels : undefined}
           />
         )}
         {connectionState === "connected" && activeModel && !showModelSelector && entityStore.providerKeys.length === 0 && (

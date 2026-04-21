@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { sql } from "../db/client.js";
 import { getActiveSubscription } from "../db/quota.js";
+import { getVerifiedFreeModels } from "../lib/model-verifier.js";
 
 export const creditsRoute = new Hono<{ Variables: { userId: string } }>();
 
@@ -53,7 +54,10 @@ creditsRoute.get("/quota", async (c) => {
   `;
   const dailyUsed = quotaRow?.date === today ? (quotaRow?.tokens_used ?? 0) : 0;
 
-  const sub = await getActiveSubscription(userId);
+  const [sub, verifiedFreeModels] = await Promise.all([
+    getActiveSubscription(userId),
+    getVerifiedFreeModels(),
+  ]);
 
   const midnight = new Date();
   midnight.setHours(24, 0, 0, 0);
@@ -61,6 +65,10 @@ creditsRoute.get("/quota", async (c) => {
   return c.json({
     plan: sub ? sub.tier : "free",
     show_model: !!sub,
+    // Verified free models: available on OpenRouter and support tool use.
+    // Desktop uses this list to populate the catalog and pick the default model.
+    free_models: verifiedFreeModels,
+    default_model: verifiedFreeModels[0] ?? "meta-llama/llama-3.3-70b-instruct:free",
     daily: {
       used: dailyUsed,
       limit: dailyLimit,

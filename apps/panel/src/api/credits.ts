@@ -44,6 +44,10 @@ export function createRechargeOrder(amount: number): Promise<{ orderId: string |
 export interface QuotaInfo {
   plan: "free" | "basic" | "pro";
   show_model: boolean;
+  /** Verified free models: available on OpenRouter and support tool use. */
+  free_models?: string[];
+  /** Recommended default model (first entry in free_models). */
+  default_model?: string;
   daily: {
     used: number;
     limit: number;

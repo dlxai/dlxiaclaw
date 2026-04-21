@@ -386,17 +386,20 @@ export const handleProviderRoutes: RouteHandler = async (req, res, url, pathname
       }
     }
 
-    // In credits mode with no own openrouter key, inject the free-tier model list
-    // so KeyModelSelector can display them (same list as buildCreditsProviderOverride).
+    // In credits mode with no own openrouter key, inject the free and premium model
+    // lists so KeyModelSelector can display and group them.
+    // Free users see only a badge (selector hidden), so premium models are UI-only
+    // for subscribers. The cloud-api proxy enforces access control at the API level.
     const accessMode = storage.settings.get(ACCESS_MODE_KEY) ?? DEFAULT_ACCESS_MODE;
     if (accessMode === "credits") {
       const hasOwnOpenrouterKey = allKeys.some(
         (k) => k.provider === "openrouter" && k.authType !== "custom",
       );
       if (!hasOwnOpenrouterKey) {
+        // Free-tier models (verified tool-use capable — keep in sync with cloud-api FREE_MODELS)
         const freeModels = [
-          { id: "meta-llama/llama-3.3-70b-instruct:free", name: "Llama 3.3 70B (free)" },
-          { id: "qwen/qwen-2.5-72b-instruct:free", name: "Qwen 2.5 72B (free)" },
+          { id: "meta-llama/llama-3.3-70b-instruct:free", name: "Llama 3.3 70B Instruct (free)" },
+          { id: "qwen/qwen-2.5-72b-instruct:free", name: "Qwen 2.5 72B Instruct (free)" },
           { id: "google/gemini-2.0-flash-exp:free", name: "Gemini 2.0 Flash (free)" },
           { id: "qwen/qwen3-next-80b-a3b-instruct:free", name: "Qwen3 80B (free)" },
           { id: "nvidia/nemotron-3-super-120b-a12b:free", name: "Nemotron 120B (free)" },
@@ -406,12 +409,29 @@ export const handleProviderRoutes: RouteHandler = async (req, res, url, pathname
           { id: "arcee-ai/trinity-large-preview:free", name: "Trinity Large (free)" },
           { id: "liquid/lfm-2.5-1.2b-instruct:free", name: "LFM 2.5 1.2B (free)" },
         ];
+        // Premium models available to subscribed users via the credits proxy.
+        // Proxy enforces subscription check; this list is for UI display only.
+        const premiumModels = [
+          { id: "anthropic/claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
+          { id: "anthropic/claude-3-5-sonnet", name: "Claude 3.5 Sonnet" },
+          { id: "anthropic/claude-3-opus", name: "Claude 3 Opus" },
+          { id: "openai/gpt-4o", name: "GPT-4o" },
+          { id: "openai/gpt-4o-mini", name: "GPT-4o Mini" },
+          { id: "openai/o3-mini", name: "o3-mini" },
+          { id: "google/gemini-2.0-flash-001", name: "Gemini 2.0 Flash" },
+          { id: "google/gemini-2.5-pro-preview-03-25", name: "Gemini 2.5 Pro" },
+          { id: "deepseek/deepseek-chat-v3-0324", name: "DeepSeek Chat V3" },
+          { id: "deepseek/deepseek-r1", name: "DeepSeek R1" },
+          { id: "mistralai/mistral-large-2411", name: "Mistral Large" },
+          { id: "meta-llama/llama-3.3-70b-instruct", name: "Llama 3.3 70B Instruct" },
+          { id: "qwen/qwen-2.5-72b-instruct", name: "Qwen 2.5 72B Instruct" },
+        ];
         const existing = catalog["openrouter"] ?? [];
         const existingIds = new Set(existing.map((e) => e.id));
-        const extras = freeModels.filter((m) => !existingIds.has(m.id));
-        if (extras.length > 0) {
-          catalog["openrouter"] = [...extras, ...existing];
-        }
+        const freeExtras = freeModels.filter((m) => !existingIds.has(m.id));
+        const premiumExtras = premiumModels.filter((m) => !existingIds.has(m.id) && !freeExtras.some(f => f.id === m.id));
+        // Free models first (shown at top of 免费模型 group), then premium
+        catalog["openrouter"] = [...freeExtras, ...premiumExtras, ...existing];
       }
     }
 
