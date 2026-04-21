@@ -398,6 +398,33 @@ tbody td {
   margin-bottom: 8px;
 }
 
+/* Credits balance display in sidebar */
+.credits-balance {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.credits-balance__icon {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.credits-balance__label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+.credits-balance__value {
+  font-weight: 600;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Sidebar bottom actions (theme + language) */
 .sidebar-bottom-actions {
   display: flex;

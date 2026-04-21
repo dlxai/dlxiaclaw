@@ -207,8 +207,8 @@ export function KeyModelSelector({
       >
         <span className="key-model-selector-model-name">{m.name}</span>
         {m.contextWindow != null && m.contextWindow > 0 && (
-          <span className="key-model-selector-model-ctx">
-            {formatContextWindow(m.contextWindow)}
+          <span className="key-model-selector-model-ctx" title="上下文窗口大小">
+            ctx {formatContextWindow(m.contextWindow)}
           </span>
         )}
       </button>
