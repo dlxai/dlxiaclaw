@@ -1433,7 +1433,9 @@ export const ChatPage = observer(function ChatPage({ onAgentNameChange }: { onAg
         )}
         {connectionState === "connected" && activeModel && !showModelSelector && entityStore.providerKeys.length === 0 && (
           <span className="chat-model-badge">
-            {activeModel.model.split("/").pop()?.replace(":free", "") ?? activeModel.model}
+            {accessMode === "credits"
+              ? t("chat.creditsDefault", { defaultValue: "默认模型" })
+              : (activeModel.model.split("/").pop()?.replace(":free", "") ?? activeModel.model)}
           </span>
         )}
         {connectionState === "connected" && (
