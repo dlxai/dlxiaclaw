@@ -3,6 +3,7 @@ import { stream } from "hono/streaming";
 import { sql } from "../db/client.js";
 import { isFreeModel } from "../config/free-models.js";
 import { getActiveSubscription, deductMonthlyTokens, deductDailyTokens } from "../db/quota.js";
+import { getVerifiedFreeModels, invalidateModelCache } from "../lib/model-verifier.js";
 
 export const proxyRoute = new Hono<{ Variables: { userId: string } }>();
 
@@ -14,6 +15,70 @@ async function recordActualUsage(userId: string, model: string, promptTokens: nu
     INSERT INTO credit_ledger (user_id, delta, reason, model, tokens)
     VALUES (${userId}, ${-tokens}, 'consumption', ${model}, ${tokens})
   `;
+}
+
+const OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions";
+
+/**
+ * Forward a request to OpenRouter, with automatic failover to the next verified
+ * free model if the request is rate-limited (429) or the model is unavailable (503).
+ *
+ * Returns { res, model } — the successful response and the model that was used.
+ * On exhaustion, returns the last failed response.
+ */
+async function forwardWithFailover(
+  payload: Record<string, unknown>,
+  masterKey: string,
+  isFree: boolean,
+): Promise<{ res: Response; model: string }> {
+  const originalModel = payload.model as string;
+
+  async function doFetch(model: string): Promise<Response> {
+    return fetch(OPENROUTER_BASE, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${masterKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://dlxai.app",
+        "X-Title": "DlxAI",
+      },
+      body: JSON.stringify({ ...payload, model }),
+    });
+  }
+
+  const firstRes = await doFetch(originalModel);
+
+  // For subscribers or non-retriable statuses, return immediately
+  const isRetriable = firstRes.status === 429 || firstRes.status === 503;
+  if (firstRes.ok || !isRetriable || !isFree) {
+    return { res: firstRes, model: originalModel };
+  }
+
+  // Rate-limited on a free model — try the other verified free models
+  console.warn(`[proxy] Model ${originalModel} returned ${firstRes.status}, attempting failover`);
+  // Invalidate cache so next getVerifiedFreeModels re-checks availability
+  if (firstRes.status === 503) invalidateModelCache();
+
+  const freeModels = await getVerifiedFreeModels();
+  const tried = new Set([originalModel]);
+
+  for (const candidate of freeModels) {
+    if (tried.has(candidate)) continue;
+    tried.add(candidate);
+
+    const res = await doFetch(candidate);
+    if (res.ok) {
+      console.info(`[proxy] Failover succeeded with model ${candidate}`);
+      return { res, model: candidate };
+    }
+    if (res.status !== 429 && res.status !== 503) {
+      // Hard error on this model — stop trying
+      return { res, model: candidate };
+    }
+  }
+
+  // All models exhausted — return the last response
+  return { res: await doFetch(freeModels[0] ?? originalModel), model: freeModels[0] ?? originalModel };
 }
 
 proxyRoute.post("/openrouter/chat/completions", async (c) => {
@@ -54,24 +119,16 @@ proxyRoute.post("/openrouter/chat/completions", async (c) => {
   }
 
   // 3. Ensure OpenRouter returns usage stats in streaming responses
-  const forwardPayload = { ...payload };
+  const forwardPayload: typeof payload = { ...payload };
   if (forwardPayload.stream === true) {
     forwardPayload.stream_options = { ...forwardPayload.stream_options, include_usage: true };
   }
 
-  // 4. Forward to OpenRouter
-  const upstreamRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${masterKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://dlxai.app",
-      "X-Title": "DlxAI",
-    },
-    body: JSON.stringify(forwardPayload),
-  });
+  // 4. Forward to OpenRouter (with free-model failover on rate limit)
+  const isFree = !sub && isFreeModel(payload.model);
+  const { res: upstreamRes, model: usedModel } = await forwardWithFailover(forwardPayload, masterKey, isFree);
 
-  // Non-OK response: return JSON error immediately
+  // Non-OK response after all failovers exhausted: return JSON error
   if (!upstreamRes.ok) {
     const errorBody = await upstreamRes.text();
     return new Response(errorBody, {
@@ -135,7 +192,7 @@ proxyRoute.post("/openrouter/chat/completions", async (c) => {
           } else {
             await deductDailyTokens(userId, totalTokens, dailyLimit).catch(() => {});
           }
-          await recordActualUsage(userId, payload.model, usagePromptTokens, usageCompletionTokens).catch(() => {});
+          await recordActualUsage(userId, usedModel, usagePromptTokens, usageCompletionTokens).catch(() => {});
         }
       }
     });
@@ -154,7 +211,7 @@ proxyRoute.post("/openrouter/chat/completions", async (c) => {
       } else {
         await deductDailyTokens(userId, totalTokens, dailyLimit).catch(() => {});
       }
-      await recordActualUsage(userId, payload.model, promptTokens, completionTokens).catch(() => {});
+      await recordActualUsage(userId, usedModel, promptTokens, completionTokens).catch(() => {});
     }
   } catch {
     // Response not JSON — skip usage tracking
