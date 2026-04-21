@@ -19,12 +19,24 @@ async function recordActualUsage(userId: string, model: string, promptTokens: nu
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions";
 
+// Cheap paid models used as last-resort fallback when all free models are rate-limited.
+// These support tool use and are cheap enough to absorb platform-side (~$0.1-0.5/M tokens).
+// Cost is still charged to the user's daily quota (token count), but the OpenRouter
+// bill comes from the master key budget — not the free-tier OpenRouter allocation.
+const CHEAP_FALLBACK_MODELS = [
+  "deepseek/deepseek-chat-v3-0324",   // ~$0.27/M — excellent tool use
+  "google/gemini-flash-1.5",          // ~$0.075/M — fast, good tool use
+  "openai/gpt-4o-mini",               // ~$0.15/M — reliable tool use
+];
+
 /**
- * Forward a request to OpenRouter, with automatic failover to the next verified
- * free model if the request is rate-limited (429) or the model is unavailable (503).
+ * Forward a request to OpenRouter, with automatic failover:
+ *   1. Try the requested free model.
+ *   2. On 429/503: try remaining verified free models in order.
+ *   3. If all free models exhausted: try cheap paid fallback models.
+ *   4. Return the last failed response if everything fails.
  *
- * Returns { res, model } — the successful response and the model that was used.
- * On exhaustion, returns the last failed response.
+ * Returns { res, model } — the successful response and the actual model used.
  */
 async function forwardWithFailover(
   payload: Record<string, unknown>,
@@ -32,6 +44,7 @@ async function forwardWithFailover(
   isFree: boolean,
 ): Promise<{ res: Response; model: string }> {
   const originalModel = payload.model as string;
+  let lastFailedRes: Response | null = null;
 
   async function doFetch(model: string): Promise<Response> {
     return fetch(OPENROUTER_BASE, {
@@ -49,16 +62,16 @@ async function forwardWithFailover(
   const firstRes = await doFetch(originalModel);
 
   // For subscribers or non-retriable statuses, return immediately
-  const isRetriable = firstRes.status === 429 || firstRes.status === 503;
-  if (firstRes.ok || !isRetriable || !isFree) {
+  const isRetriable = (s: number) => s === 429 || s === 503;
+  if (firstRes.ok || !isRetriable(firstRes.status) || !isFree) {
     return { res: firstRes, model: originalModel };
   }
 
-  // Rate-limited on a free model — try the other verified free models
+  lastFailedRes = firstRes;
   console.warn(`[proxy] Model ${originalModel} returned ${firstRes.status}, attempting failover`);
-  // Invalidate cache so next getVerifiedFreeModels re-checks availability
   if (firstRes.status === 503) invalidateModelCache();
 
+  // Stage 1: try other verified free models
   const freeModels = await getVerifiedFreeModels();
   const tried = new Set([originalModel]);
 
@@ -68,17 +81,33 @@ async function forwardWithFailover(
 
     const res = await doFetch(candidate);
     if (res.ok) {
-      console.info(`[proxy] Failover succeeded with model ${candidate}`);
+      console.info(`[proxy] Free model failover succeeded: ${candidate}`);
       return { res, model: candidate };
     }
-    if (res.status !== 429 && res.status !== 503) {
-      // Hard error on this model — stop trying
+    lastFailedRes = res;
+    if (!isRetriable(res.status)) {
+      // Hard error (4xx other than 429) — stop
       return { res, model: candidate };
     }
   }
 
-  // All models exhausted — return the last response
-  return { res: await doFetch(freeModels[0] ?? originalModel), model: freeModels[0] ?? originalModel };
+  // Stage 2: all free models exhausted — try cheap paid fallbacks
+  console.warn("[proxy] All free models rate-limited, trying cheap paid fallbacks");
+  for (const fallback of CHEAP_FALLBACK_MODELS) {
+    if (tried.has(fallback)) continue;
+    tried.add(fallback);
+
+    const res = await doFetch(fallback);
+    if (res.ok) {
+      console.info(`[proxy] Cheap fallback succeeded: ${fallback}`);
+      return { res, model: fallback };
+    }
+    lastFailedRes = res;
+    if (!isRetriable(res.status)) break;
+  }
+
+  // Everything failed — return the last error response
+  return { res: lastFailedRes!, model: originalModel };
 }
 
 proxyRoute.post("/openrouter/chat/completions", async (c) => {
