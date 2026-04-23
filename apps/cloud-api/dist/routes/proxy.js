@@ -3,6 +3,7 @@ import { stream } from "hono/streaming";
 import { sql } from "../db/client.js";
 import { isFreeModel } from "../config/free-models.js";
 import { getActiveSubscription, deductMonthlyTokens, deductDailyTokens } from "../db/quota.js";
+import { getVerifiedFreeModels, invalidateModelCache } from "../lib/model-verifier.js";
 export const proxyRoute = new Hono();
 /** Record actual consumption in the ledger and balance. */
 async function recordActualUsage(userId, model, promptTokens, completionTokens) {
@@ -13,6 +14,86 @@ async function recordActualUsage(userId, model, promptTokens, completionTokens) 
     INSERT INTO credit_ledger (user_id, delta, reason, model, tokens)
     VALUES (${userId}, ${-tokens}, 'consumption', ${model}, ${tokens})
   `;
+}
+const OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions";
+// Cheap paid models used as last-resort fallback when all free models are rate-limited.
+// These support tool use and are cheap enough to absorb platform-side (~$0.1-0.5/M tokens).
+// Cost is still charged to the user's daily quota (token count), but the OpenRouter
+// bill comes from the master key budget — not the free-tier OpenRouter allocation.
+const CHEAP_FALLBACK_MODELS = [
+    "deepseek/deepseek-chat-v3-0324", // ~$0.27/M — excellent tool use
+    "google/gemini-flash-1.5", // ~$0.075/M — fast, good tool use
+    "openai/gpt-4o-mini", // ~$0.15/M — reliable tool use
+];
+/**
+ * Forward a request to OpenRouter, with automatic failover:
+ *   1. Try the requested free model.
+ *   2. On 429/503: try remaining verified free models in order.
+ *   3. If all free models exhausted: try cheap paid fallback models.
+ *   4. Return the last failed response if everything fails.
+ *
+ * Returns { res, model } — the successful response and the actual model used.
+ */
+async function forwardWithFailover(payload, masterKey, isFree) {
+    const originalModel = payload.model;
+    let lastFailedRes = null;
+    async function doFetch(model) {
+        return fetch(OPENROUTER_BASE, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${masterKey}`,
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://dlxai.app",
+                "X-Title": "DlxAI",
+            },
+            body: JSON.stringify({ ...payload, model }),
+        });
+    }
+    const firstRes = await doFetch(originalModel);
+    // For subscribers or non-retriable statuses, return immediately
+    const isRetriable = (s) => s === 429 || s === 503;
+    if (firstRes.ok || !isRetriable(firstRes.status) || !isFree) {
+        return { res: firstRes, model: originalModel };
+    }
+    lastFailedRes = firstRes;
+    console.warn(`[proxy] Model ${originalModel} returned ${firstRes.status}, attempting failover`);
+    if (firstRes.status === 503)
+        invalidateModelCache();
+    // Stage 1: try other verified free models
+    const freeModels = await getVerifiedFreeModels();
+    const tried = new Set([originalModel]);
+    for (const candidate of freeModels) {
+        if (tried.has(candidate))
+            continue;
+        tried.add(candidate);
+        const res = await doFetch(candidate);
+        if (res.ok) {
+            console.info(`[proxy] Free model failover succeeded: ${candidate}`);
+            return { res, model: candidate };
+        }
+        lastFailedRes = res;
+        if (!isRetriable(res.status)) {
+            // Hard error (4xx other than 429) — stop
+            return { res, model: candidate };
+        }
+    }
+    // Stage 2: all free models exhausted — try cheap paid fallbacks
+    console.warn("[proxy] All free models rate-limited, trying cheap paid fallbacks");
+    for (const fallback of CHEAP_FALLBACK_MODELS) {
+        if (tried.has(fallback))
+            continue;
+        tried.add(fallback);
+        const res = await doFetch(fallback);
+        if (res.ok) {
+            console.info(`[proxy] Cheap fallback succeeded: ${fallback}`);
+            return { res, model: fallback };
+        }
+        lastFailedRes = res;
+        if (!isRetriable(res.status))
+            break;
+    }
+    // Everything failed — return the last error response
+    return { res: lastFailedRes, model: originalModel };
 }
 proxyRoute.post("/openrouter/chat/completions", async (c) => {
     const userId = c.get("userId");
@@ -48,18 +129,10 @@ proxyRoute.post("/openrouter/chat/completions", async (c) => {
     if (forwardPayload.stream === true) {
         forwardPayload.stream_options = { ...forwardPayload.stream_options, include_usage: true };
     }
-    // 4. Forward to OpenRouter
-    const upstreamRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            Authorization: `Bearer ${masterKey}`,
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://dlxai.app",
-            "X-Title": "DlxAI",
-        },
-        body: JSON.stringify(forwardPayload),
-    });
-    // Non-OK response: return JSON error immediately
+    // 4. Forward to OpenRouter (with free-model failover on rate limit)
+    const isFree = !sub && isFreeModel(payload.model);
+    const { res: upstreamRes, model: usedModel } = await forwardWithFailover(forwardPayload, masterKey, isFree);
+    // Non-OK response after all failovers exhausted: return JSON error
     if (!upstreamRes.ok) {
         const errorBody = await upstreamRes.text();
         return new Response(errorBody, {
@@ -122,7 +195,7 @@ proxyRoute.post("/openrouter/chat/completions", async (c) => {
                     else {
                         await deductDailyTokens(userId, totalTokens, dailyLimit).catch(() => { });
                     }
-                    await recordActualUsage(userId, payload.model, usagePromptTokens, usageCompletionTokens).catch(() => { });
+                    await recordActualUsage(userId, usedModel, usagePromptTokens, usageCompletionTokens).catch(() => { });
                 }
             }
         });
@@ -141,7 +214,7 @@ proxyRoute.post("/openrouter/chat/completions", async (c) => {
             else {
                 await deductDailyTokens(userId, totalTokens, dailyLimit).catch(() => { });
             }
-            await recordActualUsage(userId, payload.model, promptTokens, completionTokens).catch(() => { });
+            await recordActualUsage(userId, usedModel, promptTokens, completionTokens).catch(() => { });
         }
     }
     catch {
